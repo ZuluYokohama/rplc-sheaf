@@ -42,7 +42,6 @@ Front-end surface is coherent (`run` → `isa_exec` → certificate → `verify_
 | ID | Issue | Recommendation | Status |
 |----|--------|----------------|--------|
 | H1 | `eigh` on full dense `n*d × n*d` Laplacian — O((nd)³). Fine for n≲100–300, not for large catalogs. | Document scale; optional sparse path later. | **Open** |
-| M1 | Audit threshold default `audit_margin=0.1` is a fixed heuristic, not calibrated per domain. | Parameter exposed; calibrate per domain when needed. | **Open** (param done) |
 | M2 | ROTATE maps embed indices back via `order[:n_rem]` — approximate, not exact point correspondence. | Documented as approximate OPEN (`approx: true` in trace). | **Open** (documented) |
 | M4 | `use_persistence` on `isa_run` is accepted but unused in STEP path. | Wire through or drop kwarg. | **Open** |
 | L1 | `RandomState` vs modern `default_rng`. | Prefer `np.random.default_rng` in next pass. | **Open** |
@@ -56,6 +55,7 @@ Front-end surface is coherent (`run` → `isa_exec` → certificate → `verify_
 |----|--------|------------|
 | H2 | STEP before CORE raised / continued after HALT | Terminal HALT `reason=no_core`; outer program loop stops. Verifier rejects fatal halt. |
 | H3 | Full remainder index list always large | Opt-in via `include_remainder=True`; default is `remainder_n` only. |
+| M1 | Audit threshold default `audit_margin=0.1` is a fixed heuristic, not calibrated per domain | Parameter exposed on `audit_stratum` (default 0.1); per-domain calibration deferred. |
 | M3 | CSV empty / non-numeric unguarded | Clear `ValueError`s; path in messages; missing columns; non-finite reject. |
 | M5 | No package metadata / version | `__version__ = "1.0.0-operational"` on certs. |
 | — | Unknown opcodes silent NOP | Now terminal HALT `reason=unknown_op`. |
