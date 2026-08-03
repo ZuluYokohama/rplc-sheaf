@@ -37,8 +37,9 @@ def install(mod):
                 delta = np.array([1.0, 0.0])
             th = np.arctan2(delta[1], delta[0]) + twist * (ei % 3 == 0)
             c, s = np.cos(th), np.sin(th)
-            # Emit 2D rotation block when d >= 2
+            # Emit nonzero rotation entries directly (2D block + identity tail)
             if d >= 2:
+                # 2D rotation block
                 rows.append(ei * d + 0)
                 cols.append(u * d + 0)
                 data.append(k * c)
@@ -51,12 +52,17 @@ def install(mod):
                 rows.append(ei * d + 1)
                 cols.append(u * d + 1)
                 data.append(k * c)
-            # Emit identity-tail diagonal for d >= 3
-            for a in range(2, d):
-                rows.append(ei * d + a)
-                cols.append(u * d + a)
+                # Identity tail for a >= 2
+                for a in range(2, d):
+                    rows.append(ei * d + a)
+                    cols.append(u * d + a)
+                    data.append(k)
+            else:
+                # d == 1: just scalar k
+                rows.append(ei * d + 0)
+                cols.append(u * d + 0)
                 data.append(k)
-            # Emit -k diagonal for all d
+            # Negative identity on target vertex
             for a in range(d):
                 rows.append(ei * d + a)
                 cols.append(v * d + a)
@@ -64,11 +70,12 @@ def install(mod):
         return sparse.coo_matrix((data, (rows, cols)), shape=(m * d, n * d)).tocsr()
 
     def sheaf_lambda1(X, k_nn=4, n_cycles=0, twist=0.0, backend="auto"):
-        if backend not in ("auto", "dense", "sparse"):
-            raise ValueError(f"backend must be 'auto', 'dense', or 'sparse', got: {backend!r}")
         n, d = X.shape
         if n < 6:
             return 0.0, 1
+        # Validate backend parameter
+        if backend not in ("auto", "dense", "sparse"):
+            raise ValueError(f"backend must be 'auto', 'dense', or 'sparse', got {backend!r}")
         use_sparse = backend == "sparse" or (backend == "auto" and n * d > 200)
         edges, D = knn_edges(X, k_nn)
         if n_cycles:
@@ -82,10 +89,10 @@ def install(mod):
             return float(ev[h0]) if h0 < len(ev) else 0.0, h0
         d0 = _build_d0_sparse(X, edges, D, twist=twist)
         L = (d0.T @ d0).tocsr()
+        # Progressive eigenvalue computation: increase k until we find a positive eigenvalue
         max_k = L.shape[0] - 1
         k_req = min(8, max(max_k, 2))
         ev = None
-        # Progressively increase k_req until we have a positive eigenvalue
         while k_req <= max_k:
             try:
                 ev = eigsh(L, k=k_req, which="SM", return_eigenvectors=False, tol=1e-7, maxiter=4000)
@@ -94,11 +101,10 @@ def install(mod):
                 ev = eigsh(L2, k=k_req, sigma=1e-8, which="LM", return_eigenvectors=False, tol=1e-7, maxiter=4000)
             ev = np.sort(np.real(ev))
             ev[ev < 1e-10] = 0
-            # Check if we have a positive eigenvalue
-            pos = ev[ev > 1e-8]
-            if len(pos) > 0:
+            # Check if we have at least one positive eigenvalue
+            if np.any(ev > 1e-8):
                 break
-            # Double k_req for next iteration, capped at max_k
+            # Need more eigenvalues; increase k_req
             k_req = min(k_req * 2, max_k)
             if k_req == max_k:
                 break
