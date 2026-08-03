@@ -1,7 +1,7 @@
 # Sparse ALU (v1.1.0-sparse-auto)
 
 ## Change
-- `sheaf_lambda1(..., backend="auto"|"dense"|"sparse")`
+- Planned (review-branch-only) API: `sheaf_lambda1(..., backend)` with `backend ∈ {"auto", "dense", "sparse"}`
 - auto selects sparse when `n * d > 200`
 - sparse path: COO coboundary → CSR `L = δ0ᵀδ0` → `eigsh` (SM, shift-invert fallback)
 - dense path retained for small n and exact parity checks
