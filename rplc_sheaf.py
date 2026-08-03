@@ -25,6 +25,8 @@ import numpy as np
 from scipy.linalg import eigh
 from scipy.spatial.distance import pdist, squareform, cdist
 
+__version__ = "1.0.0-operational"
+
 ISA_OPS = (
     "PEEL", "CORE", "RESTRICT", "STRATUM", "SHEAF", "AUDIT",
     "OPEN", "ROTATE", "COVER", "FILT", "PERSIST", "HOLONOMY", "HALT",
@@ -131,7 +133,7 @@ def ordered_core(n=30, dims=3):
     A = A[:, :dims]
     return (A - A.mean(0)) / (A.std(0) + 1e-9)
 
-def audit_stratum(X, mask, n_ctrl=5, seed=0, use_persistence=False):
+def audit_stratum(X, mask, n_ctrl=5, seed=0, use_persistence=False, audit_margin=0.1):
     Xs = X[mask]
     if use_persistence:
         lam, _ = nested_persistence(Xs)
@@ -145,7 +147,7 @@ def audit_stratum(X, mask, n_ctrl=5, seed=0, use_persistence=False):
             rands.append(nested_persistence(X[idx])[0])
         else:
             rands.append(sheaf_lambda1(X[idx])[0])
-    survives = bool(lam < np.mean(rands) - 0.1 * max(np.std(rands), 1e-6))
+    survives = bool(lam < np.mean(rands) - audit_margin * max(np.std(rands), 1e-6))
     return {"lam1": float(lam), "rand_mean": float(np.mean(rands)), "survives": survives}
 
 def rplc_step(X, core, percentile=75, seed=0, use_persistence=False):
@@ -215,7 +217,22 @@ def load_csv_features(path, feature_cols, label_col=None):
     import csv
     with open(path, newline="") as f:
         rows = list(csv.DictReader(f))
-    X = np.array([[float(r[c]) for c in feature_cols] for r in rows], dtype=float)
+    if not rows:
+        raise ValueError(f"CSV is empty or has no data rows: {path}")
+    fieldnames = rows[0].keys()
+    if label_col is not None and label_col not in fieldnames:
+        raise ValueError(f"CSV missing label column {label_col!r}: {path}")
+    missing = [c for c in feature_cols if c not in fieldnames]
+    if missing:
+        raise ValueError(f"CSV missing feature columns {missing}: {path}")
+    try:
+        X = np.array([[float(r[c]) for c in feature_cols] for r in rows], dtype=float)
+    except (KeyError, ValueError, TypeError) as e:
+        raise ValueError(f"CSV feature parse failed for columns {feature_cols} in {path}: {e}") from e
+    if X.ndim != 2 or X.shape[0] == 0:
+        raise ValueError(f"CSV produced empty feature matrix: {path}")
+    if not np.isfinite(X).all():
+        raise ValueError(f"CSV features contain non-finite values (nan/inf): {path}")
     X = (X - X.mean(0)) / (X.std(0) + 1e-9)
     labels = [r[label_col] for r in rows] if label_col else None
     return X, labels, rows
@@ -262,15 +279,20 @@ def sequence_sheaf_lambda1(seq, aa_table=None, cycle=False, twist=0.0, stalk_dim
     lam1 = float(ev[h0]) if h0 < len(ev) else 0.0
     return lam1, h0
 
-def isa_exec(X, program=None, seed=0, percentile=75):
+def isa_exec(X, program=None, seed=0, percentile=75, include_remainder=False):
     if program is None:
         program = [{"op": "CORE"}, {"op": "STEP", "max": 3}, {"op": "ROTATE"}, {"op": "HALT"}]
     living = list(range(len(X)))
     trace, ladder = [], []
     core = None
+    halted = False
 
     def do_core_step(step):
-        nonlocal living
+        nonlocal living, halted
+        if core is None:
+            trace.append({"op": "HALT", "reason": "no_core"})
+            halted = True
+            return False
         if len(living) < 28:
             return False
         Xl = X[living]
@@ -280,6 +302,7 @@ def isa_exec(X, program=None, seed=0, percentile=75):
         n = int(mask.sum())
         if n < 12:
             trace.append({"op": "HALT", "reason": "stratum_small"})
+            halted = True
             return False
         audit = audit_stratum(Xl, mask, seed=seed + step)
         audit["survives"] = bool(audit["survives"])
@@ -300,8 +323,10 @@ def isa_exec(X, program=None, seed=0, percentile=75):
         try:
             _, _, Vt = np.linalg.svd(Xl_c, full_matrices=False)
             pc1 = Xl_c @ Vt[0]
-        except Exception:
+        except np.linalg.LinAlgError:
+            # SVD failed (degenerate geometry); fall back to first coordinate axis.
             pc1 = Xl[:, 0]
+            trace.append({"op": "ROTATE_FALLBACK", "reason": "svd_failed"})
         order = np.argsort(pc1)
         intervals = np.diff(pc1[order])
         if len(intervals) < 25:
@@ -323,11 +348,14 @@ def isa_exec(X, program=None, seed=0, percentile=75):
             n_rem = min(n, len(living) // 3)
             drop = set(np.array(living)[order[:n_rem]].tolist())
             living = [i for i in living if i not in drop]
-            trace.append({"op": "OPEN", "branch": "rotate", "step": step, "n": n_rem})
+            # Approximate OPEN: embed indices mapped via PC1 order, not exact point correspondence.
+            trace.append({"op": "OPEN", "branch": "rotate", "step": step, "n": n_rem, "approx": True})
             return True
         return False
 
     for instr in program:
+        if halted:
+            break
         op = instr.get("op")
         if op == "CORE":
             core = ordered_core(30, dims=X.shape[1])
@@ -336,6 +364,8 @@ def isa_exec(X, program=None, seed=0, percentile=75):
             for s in range(1, int(instr.get("max", 3)) + 1):
                 if not do_core_step(s):
                     break
+            if halted:
+                break
         elif op == "ROTATE":
             trace.append({"op": "ROTATE"})
             do_rotate(99)
@@ -343,14 +373,21 @@ def isa_exec(X, program=None, seed=0, percentile=75):
             trace.append({"op": "HALT", "living": len(living)})
             break
         else:
-            trace.append({"op": "NOP", "raw": str(op)})
+            # Unknown opcodes are fatal: do not silently NOP a malformed program.
+            trace.append({"op": "HALT", "reason": "unknown_op", "raw": str(op)})
+            halted = True
+            break
 
-    return {
+    cert = {
         "n0": int(X.shape[0]), "dims": int(X.shape[1]),
         "opened_steps": int(sum(1 for e in ladder if e.get("survives"))),
-        "remainder_n": len(living), "remainder": living,
+        "remainder_n": len(living),
         "ladder": ladder, "trace": trace, "program": program,
+        "version": __version__,
     }
+    if include_remainder:
+        cert["remainder"] = living
+    return cert
 
 def isa_run(X, max_steps=4, percentile=75, use_persistence=False, seed=0, enable_rotate=True):
     program = [{"op": "CORE"}, {"op": "STEP", "max": max_steps}]
@@ -360,6 +397,16 @@ def isa_run(X, max_steps=4, percentile=75, use_persistence=False, seed=0, enable
     return isa_exec(X, program=program, seed=seed, percentile=percentile)
 
 def verify_certificate(cert, X=None, seed=0):
+    """Validate certificate schema, fatal-halt policy, and optional replay.
+
+    Guarantees when X is provided:
+      - program equality under re-execution
+      - remainder_n within [0, n0]
+      - if cert contains remainder, exact index list match under include_remainder replay
+
+    Does not require opened_delta == 0 as a hard gate (reported for inspection).
+    Does not deep-compare full ladder/trace payloads.
+    """
     report = {"ok": True, "checks": []}
     if "program" not in cert or "trace" not in cert:
         return {"ok": False, "checks": [{"check": "schema", "pass": False}]}
@@ -368,20 +415,52 @@ def verify_certificate(cert, X=None, seed=0):
     report["checks"].append({"check": "has_CORE", "pass": "CORE" in ops})
     report["checks"].append({"check": "has_HALT", "pass": "HALT" in ops})
     report["checks"].append({"check": "opened_nonneg", "pass": int(cert.get("opened_steps", 0)) >= 0})
+
+    fatal_reasons = {"no_core", "unknown_op"}
+    fatal = any(
+        t.get("op") == "HALT" and t.get("reason") in fatal_reasons
+        for t in cert.get("trace", [])
+    )
+    report["checks"].append({"check": "no_fatal_halt", "pass": not fatal})
+
+    if "remainder" in cert:
+        rem = list(cert["remainder"])
+        n0 = int(cert.get("n0", 0))
+        rem_n = int(cert.get("remainder_n", -1))
+        unique = len(set(rem)) == len(rem)
+        bounds = all(isinstance(i, (int, np.integer)) and 0 <= int(i) < n0 for i in rem)
+        count_ok = rem_n == len(rem)
+        report["checks"].append({"check": "remainder_shape", "pass": bool(unique and bounds and count_ok)})
+
     if X is not None:
-        replay = isa_exec(X, program=cert["program"], seed=seed)
+        want_rem = "remainder" in cert
+        replay = isa_exec(
+            X, program=cert["program"], seed=seed, include_remainder=want_rem
+        )
         report["checks"].append({"check": "program_replay", "pass": replay["program"] == cert["program"]})
-        report["checks"].append({"check": "remainder_bounds", "pass": 0 <= replay["remainder_n"] <= replay["n0"]})
-        report["replay"] = {"opened_steps": replay["opened_steps"], "remainder_n": replay["remainder_n"]}
+        report["checks"].append({
+            "check": "remainder_bounds",
+            "pass": 0 <= replay["remainder_n"] <= replay["n0"],
+        })
+        if want_rem:
+            report["checks"].append({
+                "check": "remainder_match",
+                "pass": list(replay.get("remainder", [])) == list(cert.get("remainder", [])),
+            })
+        report["replay"] = {
+            "opened_steps": replay["opened_steps"],
+            "remainder_n": replay["remainder_n"],
+        }
+        # Informational only — not a pass/fail gate.
         report["opened_delta"] = abs(int(cert.get("opened_steps", 0)) - replay["opened_steps"])
     report["ok"] = all(c["pass"] for c in report["checks"] if c.get("pass") is not None)
     return report
 
-def run(X, program=None, seed=0, verify=True):
+def run(X, program=None, seed=0, verify=True, include_remainder=False):
     """Primary front-end: feature matrix → certificate (+ optional verify)."""
     if program is None:
         program = [{"op": "CORE"}, {"op": "STEP", "max": 3}, {"op": "ROTATE"}, {"op": "HALT"}]
-    cert = isa_exec(X, program=program, seed=seed)
+    cert = isa_exec(X, program=program, seed=seed, include_remainder=include_remainder)
     report = verify_certificate(cert, X=X, seed=seed) if verify else None
     return cert, report
 
@@ -423,8 +502,7 @@ def _cli():
         cert, report = run(X, program=program, seed=args.seed, verify=not args.no_verify)
     else:
         cert, report, _ = run_domain(args.domain, n=args.n, seed=args.seed, program=program, verify=not args.no_verify)
-    compact = {k: cert[k] for k in cert if k != "remainder"}
-    out = {"certificate": compact, "verify": report}
+    out = {"certificate": cert, "verify": report}
     print(json.dumps(out, indent=2, default=str))
     if args.out:
         with open(args.out, "w") as f:
