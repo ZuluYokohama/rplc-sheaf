@@ -7,13 +7,24 @@ Usage:
   sparse_backend.install(m)
   # m.sheaf_lambda1 now accepts backend="auto"|"dense"|"sparse"
   # auto selects sparse when n*d > 200
+
+Parity expectations:
+  - Dense and sparse share the same edge construction (knn + optional cycles)
+    and the same coboundary / Laplacian semantics (δ0, L = δ0ᵀδ0).
+  - Small-n (n*d ≤ 200) auto uses dense; large-n auto uses sparse (eigsh).
+  - Numerical λ1 may differ slightly between dense eigh and sparse eigsh;
+    both must preserve design-law audit (OPEN only under control survival).
+  - n < 6 early-returns (0.0, 1) before backend selection (same as dense path).
 """
 from __future__ import annotations
 import numpy as np
-from scipy.spatial.distance import pdist, squareform
 from scipy import sparse
 from scipy.sparse.linalg import eigsh
 from scipy.linalg import eigh
+
+# Shift used only for shift-invert eigsh fallback; subtracted from returned eigs.
+_FALLBACK_SHIFT = 1e-10
+
 
 def install(mod):
     """Patch mod.sheaf_lambda1 with backend-aware implementation."""
@@ -37,23 +48,43 @@ def install(mod):
                 delta = np.array([1.0, 0.0])
             th = np.arctan2(delta[1], delta[0]) + twist * (ei % 3 == 0)
             c, s = np.cos(th), np.sin(th)
-            # Emit 2D rotation block when d >= 2
+            # Emit nonzero rotation entries (2D block + identity tail)
             if d >= 2:
-                rows.append(ei * d + 0); cols.append(u * d + 0); data.append(k * c)
-                rows.append(ei * d + 0); cols.append(u * d + 1); data.append(k * (-s))
-                rows.append(ei * d + 1); cols.append(u * d + 0); data.append(k * s)
-                rows.append(ei * d + 1); cols.append(u * d + 1); data.append(k * c)
-            # Emit identity-tail diagonal for d >= 3
-            for a in range(2, d):
-                rows.append(ei * d + a); cols.append(u * d + a); data.append(k)
-            # Emit -k diagonal for all d
+                # 2D rotation block
+                rows.append(ei * d + 0)
+                cols.append(u * d + 0)
+                data.append(k * c)
+                rows.append(ei * d + 0)
+                cols.append(u * d + 1)
+                data.append(k * (-s))
+                rows.append(ei * d + 1)
+                cols.append(u * d + 0)
+                data.append(k * s)
+                rows.append(ei * d + 1)
+                cols.append(u * d + 1)
+                data.append(k * c)
+                # Identity tail for a >= 2
+                for a in range(2, d):
+                    rows.append(ei * d + a)
+                    cols.append(u * d + a)
+                    data.append(k)
+            else:
+                # d == 1: scalar k on source vertex
+                rows.append(ei * d + 0)
+                cols.append(u * d + 0)
+                data.append(k)
+            # Negative identity on target vertex
             for a in range(d):
-                rows.append(ei * d + a); cols.append(v * d + a); data.append(-k)
+                rows.append(ei * d + a)
+                cols.append(v * d + a)
+                data.append(-k)
         return sparse.coo_matrix((data, (rows, cols)), shape=(m * d, n * d)).tocsr()
 
     def sheaf_lambda1(X, k_nn=4, n_cycles=0, twist=0.0, backend="auto"):
         if backend not in ("auto", "dense", "sparse"):
-            raise ValueError(f"backend must be 'auto', 'dense', or 'sparse', got: {backend!r}")
+            raise ValueError(
+                f"backend must be 'auto', 'dense', or 'sparse', got: {backend!r}"
+            )
         n, d = X.shape
         if n < 6:
             return 0.0, 1
@@ -70,19 +101,49 @@ def install(mod):
             return float(ev[h0]) if h0 < len(ev) else 0.0, h0
         d0 = _build_d0_sparse(X, edges, D, twist=twist)
         L = (d0.T @ d0).tocsr()
+        # Progressive eigsh: grow k until a positive eigenvalue appears
         max_k = L.shape[0] - 1
         k_req = min(8, max(max_k, 2))
         ev = None
+        used_shift = False
         while k_req <= max_k:
             try:
-                ev = eigsh(L, k=k_req, which="SM", return_eigenvectors=False, tol=1e-7, maxiter=4000)
+                ev = eigsh(
+                    L,
+                    k=k_req,
+                    which="SM",
+                    return_eigenvectors=False,
+                    tol=1e-7,
+                    maxiter=4000,
+                )
+                used_shift = False
+            except (MemoryError, KeyboardInterrupt, SystemExit):
+                raise
             except Exception:
-                L2 = L + sparse.eye(L.shape[0]) * 1e-10
-                ev = eigsh(L2, k=k_req, sigma=1e-8, which="LM", return_eigenvectors=False, tol=1e-7, maxiter=4000)
+                # Shift-invert fallback; undo additive bias after eigsh
+                L2 = L + sparse.eye(L.shape[0]) * _FALLBACK_SHIFT
+                try:
+                    ev = eigsh(
+                        L2,
+                        k=k_req,
+                        sigma=1e-8,
+                        which="LM",
+                        return_eigenvectors=False,
+                        tol=1e-7,
+                        maxiter=4000,
+                    )
+                    used_shift = True
+                except (MemoryError, KeyboardInterrupt, SystemExit):
+                    raise
+                except Exception as e:
+                    raise RuntimeError(
+                        f"sparse eigsh failed (SM and shift-invert): {e}"
+                    ) from e
             ev = np.sort(np.real(ev))
+            if used_shift:
+                ev = ev - _FALLBACK_SHIFT
             ev[ev < 1e-10] = 0
-            pos = ev[ev > 1e-8]
-            if len(pos) > 0:
+            if np.any(ev > 1e-8):
                 break
             k_req = min(k_req * 2, max_k)
             if k_req == max_k:
