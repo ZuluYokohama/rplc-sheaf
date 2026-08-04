@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rplc-sheaf"
+version = "1.0.0"
+description = "RPL-C / CycleSheaf / RPL-ISA: restriction-projection under audit with sheaf obstruction"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Proprietary" }
+authors = [{ name = "Blake A. Jones", email = "b.jones@jtech.ai" }]
+dependencies = [
+  "numpy>=1.22",
+  "scipy>=1.9",
+]
+
+[project.urls]
+Homepage = "https://github.com/ZuluYokohama/rplc-sheaf"
+Repository = "https://github.com/ZuluYokohama/rplc-sheaf"
+
+[tool.setuptools]
+py-modules = ["rplc_sheaf", "sparse_backend"]

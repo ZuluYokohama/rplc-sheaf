@@ -1,0 +1,21 @@
+{
+  "name": "rplc-sheaf",
+  "version": "1.0.0",
+  "description": "RPL-C / CycleSheaf / RPL-ISA: restriction-projection under audit with sheaf obstruction. Portable ALU (dense + optional sparse backend), certificates, smoke tests, and agent skills for design-law–preserving sheaf work.",
+  "author": {
+    "name": "Blake A. Jones",
+    "email": "b.jones@jtech.ai"
+  },
+  "homepage": "https://github.com/ZuluYokohama/rplc-sheaf",
+  "repository": "https://github.com/ZuluYokohama/rplc-sheaf",
+  "license": "Proprietary",
+  "keywords": [
+    "sheaf",
+    "topology",
+    "RPL-ISA",
+    "CycleSheaf",
+    "obstruction",
+    "audit",
+    "sparse-alu"
+  ]
+}
