@@ -9,20 +9,22 @@ pre-register what is claimed, separate OPEN from RESIDUE, retract when audit dem
 2. **Certificate surface** — `isa_exec` emits JSON-stable ladder/trace; `verify_certificate` validates schema, program replay equality, remainder bounds, and rejects fatal halt reasons (`no_core`, `unknown_op`).
 3. **Abstraction** — Hardware = feature matrix; Software = ISA program; ALU = sheaf obstruction; Domains = payloads only.
 4. **Front-end completeness** — `run` / `run_domain` / CLI / CSV path.
+5. **Sparse ALU path** — `sparse_backend.install()` enables `backend="auto"|"dense"|"sparse"`. Auto selects sparse when `n*d > 200`. Closes the interactive dense O((nd)³) envelope for catalog-scale runs (n≈500 demonstrated).
 
 ## RESIDUE
 
-1. **Scale** — dense `eigh` bounds interactive n ≲ 300; sparse shift-invert not yet shipped in this tree.
+1. **Scale (partial)** — dense path remains the default for small n and parity; sparse path is available via explicit install. Full in-tree integration and performance characterization across domains still open.
 2. **`audit_margin`** — default 0.1 is a fixed heuristic; per-domain calibration deferred.
 3. **ROTATE OPEN** — approximate (PC1 order mapping); flagged `approx: true` in trace.
-4. **`use_persistence`** — accepted on `isa_run` but not wired through STEP path.
-5. **Legacy RNG** — `RandomState` vs `default_rng` modernization pending.
+4. **`use_persistence`** — accepted on `isa_run` but not fully wired through every STEP path.
+5. **Legacy RNG** — `RandomState` vs `default_rng` modernization pending in a few call sites.
 
 ## NOT CLAIMED
 
 - Domain-specific discovery for FRB / SuperCon / ClinVar / protein folds
 - Medical or diagnostic use
 - Production threshold lock without further calibration
+- That the sparse path is numerically identical to dense for every edge case (parity tests recommended)
 
 ## Cross-repo
 

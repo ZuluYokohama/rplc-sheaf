@@ -13,11 +13,19 @@ reviews:
         Flag silent NOP opcodes, swallowed exceptions, missing certificate paths.
         Dense eigh scale limits (n*d) must remain documented.
         Numerical stability of Laplacian / eigenvalue path.
+        Any change that weakens the restrict → measure → audit → OPEN/STOP gate is a hard fail.
+    - path: "sparse_backend.py"
+      instructions: |
+        Sparse path must preserve the same λ1 / h0 semantics as dense for the audited decision.
+        Flag any change that forces OPEN without audit or that silently falls back in a way that hides scale failures.
+        Document backend selection threshold and parity expectations.
     - path: "docs/**"
       instructions: |
         Claims must distinguish OPEN vs RESIDUE; no domain-decoder overclaim.
+        Scale claims must stay precise about install pattern vs in-tree default.
     - path: "tests/**"
       instructions: |
         Smoke must cover run/verify, domain path, and fatal halt behavior.
+        Prefer adding parity or backend selection coverage when touching the ALU.
 chat:
   auto_reply: true
