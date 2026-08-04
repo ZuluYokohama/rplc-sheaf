@@ -1,0 +1,23 @@
+# CodeRabbit — rplc-sheaf
+language: en-US
+reviews:
+  profile: assertive
+  request_changes_workflow: true
+  high_level_summary: true
+  poem: false
+  review_status: true
+  path_instructions:
+    - path: "rplc_sheaf.py"
+      instructions: |
+        Focus on design law: OPEN only under audit; residue never forced.
+        Flag silent NOP opcodes, swallowed exceptions, missing certificate paths.
+        Dense eigh scale limits (n*d) must remain documented.
+        Numerical stability of Laplacian / eigenvalue path.
+    - path: "docs/**"
+      instructions: |
+        Claims must distinguish OPEN vs RESIDUE; no domain-decoder overclaim.
+    - path: "tests/**"
+      instructions: |
+        Smoke must cover run/verify, domain path, and fatal halt behavior.
+chat:
+  auto_reply: true
