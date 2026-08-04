@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Blake A. Jones (JtechAI / ZuluYokohama). All rights reserved.
+# Proprietary source-available. See LICENSE and COMMERCIAL.md.
+# Evaluation Use only without a written commercial grant.
 """
 rplc_sheaf — Restriction-Projection Ladder + CycleSheaf (RPL-C / RPL-ISA)
 
@@ -324,7 +327,6 @@ def isa_exec(X, program=None, seed=0, percentile=75, include_remainder=False):
             _, _, Vt = np.linalg.svd(Xl_c, full_matrices=False)
             pc1 = Xl_c @ Vt[0]
         except np.linalg.LinAlgError:
-            # SVD failed (degenerate geometry); fall back to first coordinate axis.
             pc1 = Xl[:, 0]
             trace.append({"op": "ROTATE_FALLBACK", "reason": "svd_failed"})
         order = np.argsort(pc1)
@@ -348,7 +350,6 @@ def isa_exec(X, program=None, seed=0, percentile=75, include_remainder=False):
             n_rem = min(n, len(living) // 3)
             drop = set(np.array(living)[order[:n_rem]].tolist())
             living = [i for i in living if i not in drop]
-            # Approximate OPEN: embed indices mapped via PC1 order, not exact point correspondence.
             trace.append({"op": "OPEN", "branch": "rotate", "step": step, "n": n_rem, "approx": True})
             return True
         return False
@@ -373,7 +374,6 @@ def isa_exec(X, program=None, seed=0, percentile=75, include_remainder=False):
             trace.append({"op": "HALT", "living": len(living)})
             break
         else:
-            # Unknown opcodes are fatal: do not silently NOP a malformed program.
             trace.append({"op": "HALT", "reason": "unknown_op", "raw": str(op)})
             halted = True
             break
@@ -451,7 +451,6 @@ def verify_certificate(cert, X=None, seed=0):
             "opened_steps": replay["opened_steps"],
             "remainder_n": replay["remainder_n"],
         }
-        # Informational only — not a pass/fail gate.
         report["opened_delta"] = abs(int(cert.get("opened_steps", 0)) - replay["opened_steps"])
     report["ok"] = all(c["pass"] for c in report["checks"] if c.get("pass") is not None)
     return report
